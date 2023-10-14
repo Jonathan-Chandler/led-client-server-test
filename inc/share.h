@@ -1,0 +1,22 @@
+#ifndef __SHARE_H__
+#define __SHARE_H__
+
+#if DEBUG_NO_SHMEM
+// use debug file instead of PRU memory
+#define SHARED_MEM_MAP_FILE   "shmem-test"
+#define SHARED_MEM_START_ADDR 0x0
+#else
+// direct memory access
+#define SHARED_MEM_MAP_FILE   "/dev/mem"
+#define SHARED_MEM_START_ADDR 0x4a310000
+#endif
+
+#define SHARED_MEM_LED_BEGIN_WRITE_OFFSET 0x0
+#define SHARED_MEM_LED_COUNT_OFFSET       0x1
+#define SHARED_MEM_LED_START_OFFSET       0x2
+#define WS2812_LED_COUNT                  150 // 150 leds
+#define WS2812_LED_BIT_COUNT              24  // 24 bits per led - 8 bits each red/green/blue
+
+#define SHARED_MEM_SIZE       ((WS2812_LED_COUNT + SHARED_MEM_LED_START_OFFSET) * sizeof(uint32_t))
+
+#endif // ifdef __SHARE_H__
