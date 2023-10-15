@@ -1,17 +1,24 @@
-#include "debug.h"
-#include "led_server.h"
-#include "led_frame.h"
 #include <inttypes.h>
 #include <sstream>
 #include <stdexcept>
 #include <iostream>
 #include <cstring>
 #include <errno.h>
+#include <fcntl.h>
+#include <chrono>
+#include <thread>
+
+#include "debug.h"
+#include "led_server.h"
+#include "led_frame.h"
+
 
 Led_Server::Led_Server(int port)
     : server_port(port)
     , socket_initialized(false)
     , server_fd(-1)
+    , server_is_running(false)
+    , valid_message_count(0)
 {
 }
 
@@ -80,13 +87,14 @@ void Led_Server::bind_socket()
     dbg_notice("Led_Server successfully bind socket");
 }
 
-void Led_Server::listen_socket()
+void Led_Server::start_server()
 {
     led_msg_t client_msg;
     led_msg_t server_msg;
     int client_fd;
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
+    dbg_notice("starting server");
 
     // do not listen on invalid socket
     if (!socket_initialized)
@@ -107,17 +115,32 @@ void Led_Server::listen_socket()
         throw std::runtime_error(err_str.str());
     }
 
-    while (1) 
-    {
-        dbg_notice("Led_Server listening for clients");
+    // socket should not block so start_server can exit when given interrupt from stop_server() on another thread
+    make_socket_nonblocking();
 
-        // Accept a client connection
+    // signal server is waiting for connections
+    server_is_running.store(true);
+
+    while (server_is_running.load()) 
+    {
+        dbg_notice("accepting clients");
+
+        // accept client connection
         client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
-        if (client_fd < 0) {
-            dbg_error("Led_Server failed to create client fd");
+        if (client_fd < 0) 
+        {
+            if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) 
+            {
+                // log if the error wasn't caused because no clients were connected
+                dbg_error("Led_Server failed to handle client connection");
+            }
+
+            // sleep to avoid busy waiting for clients
+            std::this_thread::sleep_for(std::chrono::milliseconds(LED_SERVER_POLL_TIME_MS));
             continue;
         }
 
+        // record the connection
         dbg_notice("Led_Server client connected");
 
         // Receive data from client
@@ -138,6 +161,9 @@ void Led_Server::listen_socket()
 
             // Send response to client
             send(client_fd, &server_msg, sizeof(server_msg), 0);
+
+            // increment the number of valid client messages received
+            valid_message_count++;
         }
         else
         {
@@ -151,14 +177,59 @@ void Led_Server::listen_socket()
     }
 }
 
+void Led_Server::stop_server()
+{
+    server_is_running.store(false);
+}
+
+bool Led_Server::get_server_is_running()
+{
+    return server_is_running.load();
+}
+
 void Led_Server::close_socket()
 {
+    dbg_notice("closing socket");
+
     if (server_fd >= 0)
     {
-        dbg_notice("Close socket %d", server_fd);
-
         close(server_fd);
         server_fd = -1;
     }
+    else
+    {
+        dbg_error("attempted to close invalid socket %d", server_fd);
+    }
+}
+
+void Led_Server::make_socket_nonblocking() 
+{
+    int flags;
+    dbg_notice("setting socket to nonblocking mode");
+
+    // get current socket flags
+    if ( (flags = fcntl(server_fd, F_GETFL, 0)) == -1) 
+    {
+        std::ostringstream err_str;
+
+        err_str << "Led_Server failed to get flags to make nonblocking socket: " << strerror(errno) << " (" << errno << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    // add option nonblocking to current flags
+    if (fcntl(server_fd, F_SETFL, flags | O_NONBLOCK) == -1) 
+    {
+        std::ostringstream err_str;
+
+        err_str << "Led_Server failed to set flags to make nonblocking socket: " << strerror(errno) << " (" << errno << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+}
+
+int Led_Server::get_valid_message_count()
+{
+    return valid_message_count.load();
 }
 
