@@ -2,6 +2,8 @@
 #include <string>
 #include <stdexcept>
 #include <iostream>
+
+#include "unit_test.h"
 #include "led.h"
 #include "catch.hpp"
 
@@ -215,7 +217,7 @@ TEST_CASE("set_led_color fails if index is out of range", "[LedStrip::set_led_co
     {
         // expected invalid argument error
         std::cerr << "Caught exception of an expected type: " << ia.what() << std::endl;
-        REQUIRE(0 == 0);
+        REQUIRE(TEST_PASSES);
         delete(leds);
         leds = nullptr;
         return;
@@ -224,11 +226,11 @@ TEST_CASE("set_led_color fails if index is out of range", "[LedStrip::set_led_co
     {
         // unknown error
         std::cerr << "Caught an exception of an unexpected type." << std::endl;
-        REQUIRE(1 == 0);
+        REQUIRE(TEST_FAILS);
     }
 
     // should not happen
-    REQUIRE(1 == 0);
+    REQUIRE(TEST_FAILS);
 }
 
 TEST_CASE("save_all_leds and load_all_leds return expected values", "[LedStrip::save_load_all_leds]")
@@ -254,7 +256,7 @@ TEST_CASE("save_all_leds and load_all_leds return expected values", "[LedStrip::
     {
         // unknown error
         std::cerr << "Caught an exception of an unexpected type." << std::endl;
-        REQUIRE(1 == 0);
+        REQUIRE(TEST_FAILS);
     }
 
     try
@@ -265,7 +267,7 @@ TEST_CASE("save_all_leds and load_all_leds return expected values", "[LedStrip::
     {
         // unknown error
         std::cerr << "Caught an exception of an unexpected type." << std::endl;
-        REQUIRE(1 == 0);
+        REQUIRE(TEST_FAILS);
     }
 
     // check number of leds

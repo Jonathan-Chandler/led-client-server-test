@@ -7,6 +7,7 @@
 #include <chrono>
 #include <thread>
 
+#include "unit_test.h"
 #include "led.h"
 #include "led_client.h"
 #include "led_server.h"
@@ -16,34 +17,9 @@
 #define LOCAL_TEST_IP "127.0.0.1"
 #define LOCAL_TEST_PORT 1632
 
+void server_runner(Led_Server *test_server);
 std::future<void> start_test_server(Led_Server &test_server);
 void stop_test_server(Led_Server &test_server, std::future<void> &server_thread);
-
-#if 0
-void start_server_thread()
-{
-    Led_Server test_server = Led_Server(LOCAL_TEST_PORT);
-
-    try
-    {
-        test_server.create_socket();
-        test_server.bind_socket();
-        test_server.listen_socket();
-    }
-    catch (const std::exception& e)
-    {
-        std::cout << e.what() << std::endl;
-        test_server.close_socket();
-        REQUIRE(1 == 0);
-    }
-}
-
-void start_test_thread()
-{
-    printf("test\n");
-    //throw std::runtime_error("An error has occurred!");
-}
-#endif
 
 TEST_CASE("LED Client can be initialized", "[Led_Client::constructor]")
 {
@@ -60,7 +36,7 @@ TEST_CASE("LED Client can be initialized", "[Led_Client::constructor]")
         // expect runtime error because server is not running
         std::cerr << "Caught exception of an expected type: " << runtime_err.what() << std::endl;
         test_client.close_socket();
-        REQUIRE(0 == 0);
+        REQUIRE(TEST_PASSES);
         return;
     }
     catch (...)
@@ -68,14 +44,11 @@ TEST_CASE("LED Client can be initialized", "[Led_Client::constructor]")
         // unknown error
         std::cerr << "Caught an exception of an unexpected type." << std::endl;
         test_client.close_socket();
+        REQUIRE(TEST_FAILS);
     }
-    REQUIRE(1 == 0);
-}
 
-// function to run server on separate thread so server_stop can be called from main thread
-void server_runner(Led_Server *test_server)
-{
-    test_server->start_server();
+    // expect runtime error
+    REQUIRE(TEST_FAILS);
 }
 
 TEST_CASE("LED server can be initialized", "[Led_Server::constructor]")
@@ -92,12 +65,10 @@ TEST_CASE("LED server can be initialized", "[Led_Server::constructor]")
         // unknown error
         std::cerr << "unexpected exception while starting test_server" << std::endl;
         test_server.close_socket();
-        REQUIRE(1 == 0);
-        return;
+        REQUIRE(TEST_FAILS);
     }
 
     // run the server in its own thread in order to accept test client connection
-    //std::thread server_thread(server_runner, &test_server);
     std::future<void> server_thread = std::async(std::launch::async, server_runner, &test_server);
 
     // wait maximum of 5 seconds for the server thread to start
@@ -118,8 +89,7 @@ TEST_CASE("LED server can be initialized", "[Led_Server::constructor]")
     if (status != std::future_status::ready) 
     {
         std::cerr << "Led_Server timed out after stop was requested" << std::endl;
-        REQUIRE(1 == 0);
-        return;
+        REQUIRE(TEST_FAILS);
     } 
 
     // server thread join
@@ -130,11 +100,10 @@ TEST_CASE("LED server can be initialized", "[Led_Server::constructor]")
     catch (...)
     {
         std::cerr << "Led_Server thread returned unexpected exception" << std::endl;
-        REQUIRE(1 == 0);
-        return;
+        REQUIRE(TEST_FAILS);
     }
     
-    REQUIRE(0 == 0);
+    REQUIRE(TEST_PASSES);
 }
 
 TEST_CASE("Led_Client can connect to Led_Server", "[Led_Server::start_server]")
@@ -151,8 +120,7 @@ TEST_CASE("Led_Client can connect to Led_Server", "[Led_Server::start_server]")
     catch (...)
     {
         std::cerr << "Unexpected error while starting test server" << std::endl;
-        REQUIRE(1 == 0);
-        return;
+        REQUIRE(TEST_FAILS);
     }
 
     // attempt to connect/send to the server with test_client
@@ -166,16 +134,14 @@ TEST_CASE("Led_Client can connect to Led_Server", "[Led_Server::start_server]")
     {
         std::cerr << "Unexpected runtime error: " << runtime_err.what() << std::endl;
         test_client.close_socket();
-        REQUIRE(1 == 0);
-        return;
+        REQUIRE(TEST_FAILS);
     }
     catch (...)
     {
         // unknown error
         std::cerr << "Unexpected error" << std::endl;
         test_client.close_socket();
-        REQUIRE(1 == 0);
-        return;
+        REQUIRE(TEST_FAILS);
     }
 
     // stop the test server
@@ -186,12 +152,17 @@ TEST_CASE("Led_Client can connect to Led_Server", "[Led_Server::start_server]")
     catch (...)
     {
         std::cerr << "Unexpected error while stopping test server" << std::endl;
-        REQUIRE(1 == 0);
-        return;
+        REQUIRE(TEST_FAILS);
     }
 
     // make sure server received the client message
     REQUIRE(test_server.get_valid_message_count() == 1);
+}
+
+// function to run server on separate thread so server_stop can be called from main thread
+void server_runner(Led_Server *test_server)
+{
+    test_server->start_server();
 }
 
 std::future<void> start_test_server(Led_Server &test_server)
