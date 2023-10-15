@@ -2,6 +2,7 @@
 #include <string>
 #include <stdexcept>
 #include <iostream>
+#include <arpa/inet.h>
 
 #include "unit_test.h"
 #include "led.h"
@@ -290,5 +291,92 @@ TEST_CASE("save_all_leds and load_all_leds return expected values", "[LedStrip::
 
     if (saved_leds != nullptr)
         delete(saved_leds);
+}
+
+TEST_CASE("get_led_net_frame returns valid vector", "[LedStrip::get_led_net_frame]")
+{
+    Led_Strip *leds;
+    int compare = 0;
+    Led_Strip::led_color_t test_led = {.red = 0, .green = 255, .blue = 0};
+    char expected_magic[] = LED_MAGIC;
+    int led_count;
+
+    // expected init values
+    test_led.red = 0;
+    test_led.green = 255;
+    test_led.blue = 0;
+
+    // initialize as green
+    leds = new Led_Strip(12, 0, 255, 0);
+    REQUIRE(leds != nullptr);
+
+    std::vector<uint8_t> net_frame = leds->get_led_net_frame();
+
+    // 44 = 4+4+12*3 -> strlen('LEDS') + sizeof(uint32_t) + led_count*sizeof(led_color_t)
+    int expected_size = strlen("LEDS") + sizeof(uint32_t) + 12*sizeof(Led_Strip::led_color_t);
+    printf("expected size = %d\n", expected_size);
+
+    // size matches
+    REQUIRE(net_frame.size() == expected_size);
+
+    // reinterpret to check matches led_net_t layout
+    Led_Strip::led_net_t *converted_data = reinterpret_cast<Led_Strip::led_net_t*>(net_frame.data());
+
+    // magic string matches
+    for (int i = 0; i < LED_MAGIC_LEN; i++)
+    {
+        REQUIRE(converted_data->led_magic[i] == expected_magic[i]);
+    }
+
+    // size value in net frame matches (12 leds)
+    led_count = ntohl(converted_data->net_led_count);
+    REQUIRE(led_count == 12);
+
+    // check if led count matches given the number bytes remaining in net_frame
+    int remaining_bytes = net_frame.size() - sizeof(Led_Strip::led_net_t);
+    int expected_remaining_bytes = led_count * sizeof(Led_Strip::led_color_t);
+
+    REQUIRE(remaining_bytes == expected_remaining_bytes);
+
+#if 0
+    // data values match
+    for (int i = 8; i < expected_remaining_bytes; i++)
+    {
+        printf("&led[%d] = %p\n", i, &net_frame.data()[i]);
+        printf("led[%d] = %X\n", i, net_frame.data()[i]);
+        printf("\n");
+    }
+#endif
+
+    // led values match
+    for (int i = 0; i < led_count; i++)
+    {
+        REQUIRE(memcmp(&converted_data->raw_led_data[i], &test_led, sizeof(Led_Strip::led_color_t)) == 0);
+    }
+
+    delete(leds);
+}
+
+TEST_CASE("get_led_net_frame returns matches set_led_net_frame", "[LedStrip::set_led_net_frame]")
+{
+    Led_Strip leds(12, 0, 255, 0);
+    Led_Strip leds_copy(19);
+    int compare = 0;
+    char expected_magic[] = LED_MAGIC;
+
+    std::vector<uint8_t> net_frame = leds.get_led_net_frame();
+    leds_copy.set_leds_from_net_frame(net_frame);
+
+    // led count matches copied leds
+    REQUIRE(leds.get_led_count() == leds_copy.get_led_count());
+    REQUIRE(leds.get_led_count() == 12);
+
+    // leds match input values
+    for (int i = 0; i < 12; i++)
+    {
+        std::unique_ptr<Led_Strip::led_color_t> led_1 = leds.get_led_color(i);
+        std::unique_ptr<Led_Strip::led_color_t> led_2 = leds_copy.get_led_color(i);
+        REQUIRE(memcmp(led_1.get(), led_2.get(), sizeof(Led_Strip::led_color_t)) == 0);
+    }
 }
 

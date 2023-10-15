@@ -373,13 +373,73 @@ std::vector<uint8_t> Led_Strip::get_led_net_frame()
 
     // copy led rgb values
     frame_ptr += sizeof(net_led_count);
-    memcpy(frame_ptr, led_strip.data(), led_strip.size());
+    memcpy(frame_ptr, led_strip.data(), (led_strip.size() * sizeof(led_color_t)));
 
     return led_frame_data;
 }
 
-Led_Strip& Led_Strip::set_leds_serialized(std::unique_ptr<char[]> &led_data)
+Led_Strip& Led_Strip::set_leds_from_net_frame(std::vector<uint8_t> &net_frame)
 {
+    uint32_t led_count;
+    char magic_str[] = LED_MAGIC;
+    led_net_t *net_frame_ptr;
+    int remaining_bytes;
+    int expected_remaining_bytes;
+    std::vector<led_color_t> copied_led_strip;
+
+    // check if frame is too small
+    if (net_frame.size() < sizeof(led_net_t))
+    {
+        std::ostringstream err_str;
+        err_str << "Network frame too small, received " << net_frame.size() << " bytes (expected " << sizeof(led_net_t) << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    // reinterpret vector data as led_net_t
+    net_frame_ptr = reinterpret_cast<led_net_t*>(net_frame.data());
+
+    // check for LEDS magic value
+    for (int i = 0; i < LED_MAGIC_LEN; i++)
+    {
+        if (net_frame_ptr->led_magic[i] != magic_str[i])
+        {
+            std::string err = "Failed to validate net frame magic value";
+            dbg_error("%s", err.c_str());
+            throw std::runtime_error(err);
+        }
+    }
+
+    // convert led count back to host format
+    led_count = ntohl(net_frame_ptr->net_led_count);
+
+    // check if led count matches given the number bytes remaining in net_frame
+    remaining_bytes = net_frame.size() - sizeof(led_net_t);
+    expected_remaining_bytes = led_count * sizeof(led_color_t);
+
+    if (remaining_bytes != expected_remaining_bytes)
+    {
+        std::ostringstream err_str;
+        err_str << "Network frame size did not match, " << remaining_bytes << " bytes remaining in frame (expected " << expected_remaining_bytes << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    // allocate space for new led configuration
+    copied_led_strip.resize(led_count);
+    if (copied_led_strip.size() != led_count)
+    {
+        std::string err = "Failed to allocate space for led colors";
+        dbg_error("%s", err.c_str());
+        throw std::runtime_error(err);
+    }
+
+    // copy from net_frame to new led configuration
+    memcpy(copied_led_strip.data(), net_frame_ptr->raw_led_data, led_count*sizeof(led_color_t));
+
+    // update this->led_strip to configuration copied from net_frame
+    led_strip = copied_led_strip;
+
     return *this;
 }
 

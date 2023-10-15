@@ -59,7 +59,7 @@ public:
 
     int get_led_net_frame_size();
     std::vector<uint8_t> get_led_net_frame();
-    Led_Strip& set_leds_serialized(std::unique_ptr<char[]> &led_data);
+    Led_Strip& set_leds_from_net_frame(std::vector<uint8_t> &net_frame);
 
 private:
     std::vector<led_color_t> led_strip;
