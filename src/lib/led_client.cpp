@@ -152,6 +152,67 @@ void Led_Client::send_socket()
     }
 }
 
+#if 0
+void Led_Client::send_leds()
+{
+    led_msg_t client_msg;
+    led_msg_t server_msg;
+    ssize_t bytes_sent;
+    ssize_t bytes_rcvd;
+    const char *client_msg_data = "Message from client";
+
+    // do not send to invalid socket
+    if (!socket_initialized)
+    {
+        std::ostringstream err_str;
+
+        err_str << "Led_Client failed to send - socket is not initialized";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    // create client message
+    client_msg.magic = LED_MSG_MAGIC;
+    client_msg.id = 0;
+    client_msg.length = strlen(client_msg_data);
+    memcpy(client_msg.data, client_msg_data, strlen(client_msg_data)+1);
+
+    // send client message to server
+    if ((bytes_sent = send(client_fd, &client_msg, sizeof(client_msg), 0)) != sizeof(client_msg))
+    {
+        std::ostringstream err_str;
+
+        err_str << "Led_Client failed to send: sent " << bytes_sent << " (expected " << sizeof(client_msg) << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    // Receive response from server
+    if ((bytes_rcvd = recv(client_fd, &server_msg, sizeof(server_msg), 0)) != sizeof(server_msg))
+    {
+        std::ostringstream err_str;
+
+        err_str << "Led_Client failed to receive server message: receive " << bytes_rcvd << " (expected " << sizeof(server_msg) << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    if (server_msg.magic == LED_MSG_MAGIC)
+    {
+        std::ostringstream notice_str;
+        notice_str << "Led_Client received data: " << server_msg.data;
+        dbg_notice("%s", notice_str.str().c_str());
+    }
+    else
+    {
+        std::ostringstream err_str;
+        err_str << "Led_Client received invalid magic value from server";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+}
+#endif
+
 void Led_Client::close_socket()
 {
     if (client_fd >= 0)

@@ -106,7 +106,7 @@ TEST_CASE("LED server can be initialized", "[Led_Server::constructor]")
     REQUIRE(TEST_PASSES);
 }
 
-TEST_CASE("Led_Client can connect to Led_Server", "[Led_Server::start_server]")
+TEST_CASE("Led_Client can connect to Led_Server", "[Led_Client::send_socket]")
 {
     Led_Client test_client(LOCAL_TEST_IP, LOCAL_TEST_PORT);
     Led_Server test_server(LOCAL_TEST_PORT);

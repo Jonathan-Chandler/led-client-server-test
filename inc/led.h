@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <vector>
 
+#define LED_MAGIC       "LEDS"
+#define LED_MAGIC_LEN   (sizeof(LED_MAGIC) - 1)
+
 class Led_Strip
 {
 public:
@@ -14,11 +17,13 @@ public:
         uint8_t blue;
     } __attribute__((packed)) led_color_t;
 
-    typedef struct ser_led_strip_t
+    // format used to send led data over network
+    typedef struct led_net_t
     {
-        uint32_t data_len;
-        uint8_t *data;
-    }  __attribute__((packed)) ser_led_strip_t;
+        char led_magic[LED_MAGIC_LEN];
+        uint32_t net_led_count;
+        led_color_t raw_led_data[0];
+    }  __attribute__((packed)) led_net_t;
 
     // initialize led strip with led_count leds with all color values 255
     Led_Strip(int led_count);
@@ -52,13 +57,14 @@ public:
     Led_Strip& load_all_leds(const char *file_path);
     Led_Strip& save_all_leds(const char *file_path);
 
-    std::unique_ptr<ser_led_strip_t> get_leds_serialized();
+    int get_led_net_frame_size();
+    std::vector<uint8_t> get_led_net_frame();
     Led_Strip& set_leds_serialized(std::unique_ptr<char[]> &led_data);
 
 private:
     std::vector<led_color_t> led_strip;
     static const led_color_t led_color_white;
-    static const std::string led_file_magic;
+    static const std::string led_magic;
     static const int led_file_min_len;
     static const int led_file_max_len;
 };
@@ -69,3 +75,17 @@ private:
 //int led_read_file_pointer(led_config_t **ret_config, FILE *file_ptr);
 
 #endif // __LED_H__
+
+//class Led_Strip
+//{
+//public:
+//    typedef struct led_net_t
+//    {
+//        char led_magic[led_magic.length()];
+//        uint8_t *data;
+//    }  __attribute__((packed)) led_net_t;
+//
+//private:
+//    static const std::string led_magic;
+//};
+//

@@ -9,15 +9,16 @@
 #include <vector>
 #include <stdexcept>
 #include <fstream>
+#include <arpa/inet.h>
 
 #include "debug.h"
 #include "share.h"
 #include "led.h"
 
 // loaded LED file must start with this string
-const std::string Led_Strip::led_file_magic = std::string("LEDS");
+const std::string Led_Strip::led_magic = std::string(LED_MAGIC);
 const Led_Strip::led_color_t Led_Strip::led_color_white = {255, 255, 255};
-const int Led_Strip::led_file_min_len = (led_file_magic.length() + sizeof(led_color_t));
+const int Led_Strip::led_file_min_len = (led_magic.length() + sizeof(led_color_t));
 const int Led_Strip::led_file_max_len = (Led_Strip::led_file_min_len + (WS2812_LED_COUNT*sizeof(led_color_t)));
 
 Led_Strip::Led_Strip(int led_count_arg)
@@ -263,9 +264,9 @@ Led_Strip& Led_Strip::load_all_leds(const char *file_path)
     input_file.close();
 
     // check for magic value
-    for (int i = 0; i < led_file_magic.length(); i++)
+    for (int i = 0; i < led_magic.length(); i++)
     {
-        if (buffer[i] != led_file_magic[i])
+        if (buffer[i] != led_magic[i])
         {
             delete[] buffer;
 
@@ -275,16 +276,16 @@ Led_Strip& Led_Strip::load_all_leds(const char *file_path)
     }
 
     // check if remaining file is evenly divisible by sizeof(led_color_t)
-    if (((size_t)file_size - led_file_magic.length()) % sizeof(led_color_t))
+    if (((size_t)file_size - led_magic.length()) % sizeof(led_color_t))
     {
         delete[] buffer;
 
         err_str << "Led_Strip data file was not valid - contains invalid LED definition (" 
-            << ((size_t)file_size - led_file_magic.length())  
+            << ((size_t)file_size - led_magic.length())  
             << " % "
             << sizeof(led_color_t)
             << " = " 
-            << (((size_t)file_size - led_file_magic.length()) % sizeof(led_color_t))
+            << (((size_t)file_size - led_magic.length()) % sizeof(led_color_t))
             << " (expected 0)";
         throw std::runtime_error(err_str.str());
     }
@@ -294,7 +295,7 @@ Led_Strip& Led_Strip::load_all_leds(const char *file_path)
 
     // read led values
     int x;
-    for (x = led_file_magic.length(); x < file_size; x+=sizeof(led_color_t))
+    for (x = led_magic.length(); x < file_size; x+=sizeof(led_color_t))
     {
         if ((x + sizeof(led_color_t)) <= file_size)
         {
@@ -308,7 +309,7 @@ Led_Strip& Led_Strip::load_all_leds(const char *file_path)
             throw std::runtime_error(err_str.str());
         }
     }
-    x -= led_file_magic.length();
+    x -= led_magic.length();
     x /= sizeof(led_color_t);
 
     std::cout << "read " << x << " led definitions" << std::endl;
@@ -318,8 +319,8 @@ Led_Strip& Led_Strip::load_all_leds(const char *file_path)
 
 Led_Strip& Led_Strip::save_all_leds(const char *file_path)
 {
-    const char *led_magic_buffer = led_file_magic.c_str();
-    size_t led_magic_buffer_size = led_file_magic.length();
+    const char *led_magic_buffer = led_magic.c_str();
+    size_t led_magic_buffer_size = led_magic.length();
     char *led_buffer = (char*) &led_strip[0];
     size_t led_buffer_size = led_strip.size()*sizeof(led_color_t);
     std::ofstream output_file(file_path, std::ios::trunc | std::ios::binary);
@@ -341,15 +342,55 @@ Led_Strip& Led_Strip::save_all_leds(const char *file_path)
     return *this;
 }
 
-std::unique_ptr<Led_Strip::ser_led_strip_t> Led_Strip::get_leds_serialized()
+int Led_Strip::get_led_net_frame_size()
 {
-    std::unique_ptr<ser_led_strip_t> serialized_leds;
+    // total bytes required to store led frame
+    // returns: 4 + 4 + 3*led_count
+    return (LED_MAGIC_LEN + sizeof(uint32_t) + (get_led_count() * sizeof(led_color_t)));
+}
 
-    return serialized_leds;
+std::vector<uint8_t> Led_Strip::get_led_net_frame()
+{
+    std::vector<uint8_t> led_frame_data(get_led_net_frame_size());
+    uint32_t net_led_count = htonl(get_led_count());
+    char magic_str[] = LED_MAGIC;
+    uint8_t *frame_ptr;
+
+    if (led_frame_data.size() < get_led_net_frame_size())
+    {
+        std::string err = "Failed to allocate space for frame";
+        dbg_error("%s", err.c_str());
+        throw std::runtime_error(err);
+    }
+
+    // copy magic string
+    frame_ptr = led_frame_data.data();
+    memcpy(frame_ptr, magic_str, LED_MAGIC_LEN);
+
+    // copy led count
+    frame_ptr += LED_MAGIC_LEN;
+    memcpy(frame_ptr, &net_led_count, sizeof(net_led_count));
+
+    // copy led rgb values
+    frame_ptr += sizeof(net_led_count);
+    memcpy(frame_ptr, led_strip.data(), led_strip.size());
+
+    return led_frame_data;
 }
 
 Led_Strip& Led_Strip::set_leds_serialized(std::unique_ptr<char[]> &led_data)
 {
     return *this;
 }
+
+#if 0
+led_net_t* create_led_net(size_t num_leds) 
+{
+    led_net_t* p = (led_net_t*)malloc(sizeof(led_net_t) + num_leds * sizeof(led_color_t));
+
+    p->net_led_count = num_leds;
+
+    return p;
+}
+#endif
 
