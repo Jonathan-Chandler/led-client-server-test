@@ -24,11 +24,8 @@ public:
 private:
     struct sockaddr_in server_addr;
     int server_port;
-    bool socket_initialized;
     std::atomic<bool> server_is_running;
     std::atomic<int> valid_message_count;
-
-    void make_socket_nonblocking();
 };
 
 #endif // ifndef __Led_Server_H__

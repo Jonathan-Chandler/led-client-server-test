@@ -1,13 +1,26 @@
+#include <sstream>
+#include <stdexcept>
+#include <thread>
+#include <fcntl.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+
+#include "led.h"
 #include "led_network.h"
 #include "debug.h"
 
+
 Led_Network::Led_Network()
-    : sock_fd(-1)
+    : socket_fd(-1)
+    , socket_initialized(false)
 {
 }
 
 Led_Network::~Led_Network()
 {
+    close_socket();
 }
 
 void Led_Network::create_socket()
@@ -15,28 +28,65 @@ void Led_Network::create_socket()
     int opt;
 
     // Create socket
-    sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_fd < 0) 
+    socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_fd < 0) 
     {
         std::ostringstream err_str;
 
-        err_str << "Led_Client failed to open socket: " << strerror(errno) << " (" << errno << ")";
+        err_str << "failed to open socket: " << strerror(errno) << " (" << errno << ")";
         dbg_error("%s", err_str.str().c_str());
         throw std::runtime_error(err_str.str());
     }
 
     // enable SO_REUSEADDR to allow client socket rebind after closing without waiting for TIME_WAIT
     opt = 1;
-    if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     {
         std::ostringstream err_str;
 
-        err_str << "Led_Client failed to set socket options: " << strerror(errno) << " (" << errno << ")";
+        err_str << "failed to set socket options: " << strerror(errno) << " (" << errno << ")";
         dbg_error("%s", err_str.str().c_str());
         throw std::runtime_error(err_str.str());
     }
 
-    dbg_verbose("created socket %d", sock_fd);
+    dbg_verbose("created socket %d", socket_fd);
+}
+
+void Led_Network::make_socket_nonblocking() 
+{
+    int flags;
+    dbg_notice("setting socket to nonblocking mode");
+
+    // get current socket flags
+    if ( (flags = fcntl(socket_fd, F_GETFL, 0)) == -1) 
+    {
+        std::ostringstream err_str;
+
+        err_str << "failed to get flags to make nonblocking socket: " << strerror(errno) << " (" << errno << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    // add option nonblocking to current flags
+    if (fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK) == -1) 
+    {
+        std::ostringstream err_str;
+
+        err_str << "failed to set flags to make nonblocking socket: " << strerror(errno) << " (" << errno << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+}
+
+void Led_Network::close_socket()
+{
+    if (socket_fd >= 0)
+    {
+        dbg_notice("close socket %d", socket_fd);
+
+        close(socket_fd);
+        socket_fd = -1;
+    }
 }
 
 bool Led_Network::tcp_receive_timeout(
@@ -49,16 +99,6 @@ bool Led_Network::tcp_receive_timeout(
     return (elapsed >= std::chrono::milliseconds(LED_MESSAGE_TIMEOUT_MS));
 }
 
-void Led_Network::close_socket()
-{
-    if (sock_fd >= 0)
-    {
-        dbg_notice("Close socket %d", sock_fd);
-
-        close(sock_fd);
-        sock_fd = -1;
-    }
-}
 
 void Led_Network::send_all(const std::vector<uint8_t> &led_frame)
 {
@@ -97,7 +137,7 @@ void Led_Network::send_all(const std::vector<uint8_t> &led_frame)
         remaining_size = expected_size - total_bytes_sent;
 
         // attempt to send to server
-        bytes_sent = send(sock_fd, send_ptr, remaining_size, 0);
+        bytes_sent = send(socket_fd, send_ptr, remaining_size, 0);
         if (bytes_sent == -1)
         {
             std::ostringstream err_str;
@@ -155,7 +195,7 @@ std::vector<uint8_t> Led_Network::receive_all()
         remaining_size = expected_size - total_bytes_recv;
 
         // attempt to send to server
-        bytes_recv = recv(sock_fd, recv_ptr, remaining_size, 0);
+        bytes_recv = recv(socket_fd, recv_ptr, remaining_size, 0);
         if (bytes_recv == -1)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK) 
@@ -233,7 +273,7 @@ std::vector<uint8_t> Led_Network::receive_all()
         }
 
         // attempt to send to server
-        bytes_recv = recv(sock_fd, recv_ptr, remaining_size, 0);
+        bytes_recv = recv(socket_fd, recv_ptr, remaining_size, 0);
         if (bytes_recv == -1)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -290,7 +330,7 @@ void Led_Client::send_leds(std::vector<uint8_t> led_frame)
     // send client message to server
     while (total_bytes_sent < led_frame.size())
     {
-        bytes_sent = send(sock_fd, &client_msg, sizeof(client_msg), 0);
+        bytes_sent = send(socket_fd, &client_msg, sizeof(client_msg), 0);
         if (bytes_sent == -1)
         {
             std::ostringstream err_str;
@@ -302,7 +342,7 @@ void Led_Client::send_leds(std::vector<uint8_t> led_frame)
     }
 
     // Receive response from server
-    if ((bytes_rcvd = recv(sock_fd, &server_msg, sizeof(server_msg), 0)) != sizeof(server_msg))
+    if ((bytes_rcvd = recv(socket_fd, &server_msg, sizeof(server_msg), 0)) != sizeof(server_msg))
     {
         std::ostringstream err_str;
 

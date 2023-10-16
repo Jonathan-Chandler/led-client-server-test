@@ -17,6 +17,7 @@
 #define LOCAL_TEST_IP "127.0.0.1"
 #define LOCAL_TEST_PORT 1632
 
+#if 0
 void server_runner(Led_Server *test_server);
 std::future<void> start_test_server(Led_Server &test_server);
 void stop_test_server(Led_Server &test_server, std::future<void> &server_thread);
@@ -209,4 +210,5 @@ void stop_test_server(Led_Server &test_server, std::future<void> &server_thread)
     // forward any errors thrown by the server thread
     server_thread.get();
 }
+#endif
 

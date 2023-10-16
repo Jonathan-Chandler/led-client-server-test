@@ -4,7 +4,6 @@
 #include <iostream>
 #include <cstring>
 #include <errno.h>
-#include <fcntl.h>
 #include <chrono>
 #include <thread>
 
@@ -15,7 +14,6 @@
 Led_Server::Led_Server(int port)
     : Led_Network()
     , server_port(port)
-    , socket_initialized(false)
     , server_is_running(false)
     , valid_message_count(0)
 {
@@ -23,7 +21,6 @@ Led_Server::Led_Server(int port)
 
 Led_Server::~Led_Server()
 {
-    close_socket();
 }
 
 void Led_Server::bind_socket()
@@ -32,17 +29,17 @@ void Led_Server::bind_socket()
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(server_port);
 
-    if (server_fd < 0)
+    if (socket_fd < 0)
     {
         std::ostringstream err_str;
 
-        err_str << "Led_Server bind received invalid socket descriptor: " << server_fd;
+        err_str << "Led_Server bind received invalid socket descriptor: " << socket_fd;
         dbg_error("%s", err_str.str().c_str());
         throw std::runtime_error(err_str.str());
     }
 
     // Bind socket
-    if (bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0)
+    if (bind(socket_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0)
     {
         std::ostringstream err_str;
 
@@ -57,6 +54,7 @@ void Led_Server::bind_socket()
     dbg_notice("Led_Server successfully bind socket");
 }
 
+#if 0
 void Led_Server::start_server()
 {
     led_msg_t client_msg;
@@ -76,7 +74,7 @@ void Led_Server::start_server()
         throw std::runtime_error(err_str.str());
     }
 
-    if (listen(server_fd, 5) < 0) 
+    if (listen(socket_fd, 5) < 0) 
     {
         std::ostringstream err_str;
 
@@ -96,7 +94,7 @@ void Led_Server::start_server()
         dbg_notice("accepting clients");
 
         // accept client connection
-        client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
+        client_fd = accept(socket_fd, (struct sockaddr*)&client_addr, &client_len);
         if (client_fd < 0) 
         {
             if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) 
@@ -146,6 +144,7 @@ void Led_Server::start_server()
         dbg_notice("Led_Server client disconnect");
     }
 }
+#endif
 
 void Led_Server::stop_server()
 {
@@ -155,47 +154,6 @@ void Led_Server::stop_server()
 bool Led_Server::get_server_is_running()
 {
     return server_is_running.load();
-}
-
-void Led_Server::close_socket()
-{
-    dbg_notice("closing socket");
-
-    if (server_fd >= 0)
-    {
-        close(server_fd);
-        server_fd = -1;
-    }
-    else
-    {
-        dbg_error("attempted to close invalid socket %d", server_fd);
-    }
-}
-
-void Led_Server::make_socket_nonblocking() 
-{
-    int flags;
-    dbg_notice("setting socket to nonblocking mode");
-
-    // get current socket flags
-    if ( (flags = fcntl(server_fd, F_GETFL, 0)) == -1) 
-    {
-        std::ostringstream err_str;
-
-        err_str << "Led_Server failed to get flags to make nonblocking socket: " << strerror(errno) << " (" << errno << ")";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
-
-    // add option nonblocking to current flags
-    if (fcntl(server_fd, F_SETFL, flags | O_NONBLOCK) == -1) 
-    {
-        std::ostringstream err_str;
-
-        err_str << "Led_Server failed to set flags to make nonblocking socket: " << strerror(errno) << " (" << errno << ")";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
 }
 
 int Led_Server::get_valid_message_count()

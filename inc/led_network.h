@@ -16,7 +16,10 @@ public:
     void close_socket();
 
 protected:
-    int sock_fd;
+    int socket_fd;
+    bool socket_initialized;
+
+    void make_socket_nonblocking();
     bool tcp_receive_timeout(const std::chrono::time_point<std::chrono::high_resolution_clock>& start);
     void send_all(const std::vector<uint8_t> &buffer);
     std::vector<uint8_t> receive_all();

@@ -29,11 +29,7 @@ private:
     struct sockaddr_in server_addr;
     std::string server_ip;
     int server_port;
-    bool socket_initialized;
-    int client_fd;
 
-    void send_all(const std::vector<uint8_t> &buffer);
-    std::vector<uint8_t> receive_all();
 };
 
 #endif // ifndef __LED_CLIENT_H__
