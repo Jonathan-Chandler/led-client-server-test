@@ -209,4 +209,4 @@ void stop_test_server(Led_Server &test_server, std::future<void> &server_thread)
     // forward any errors thrown by the server thread
     server_thread.get();
 }
-    
+

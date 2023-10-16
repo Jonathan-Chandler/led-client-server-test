@@ -10,13 +10,12 @@
 
 #include "debug.h"
 #include "led_server.h"
-#include "led_frame.h"
 
 
 Led_Server::Led_Server(int port)
-    : server_port(port)
+    : Led_Network()
+    , server_port(port)
     , socket_initialized(false)
-    , server_fd(-1)
     , server_is_running(false)
     , valid_message_count(0)
 {
@@ -25,35 +24,6 @@ Led_Server::Led_Server(int port)
 Led_Server::~Led_Server()
 {
     close_socket();
-}
-
-void Led_Server::create_socket()
-{
-    int opt;
-
-    // Create socket
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) 
-    {
-        std::ostringstream err_str;
-
-        err_str << "Led_Server failed to open socket: " << strerror(errno) << " (" << errno << ")";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
-
-    // enable SO_REUSEADDR to allow server socket rebind after closing without waiting for TIME_WAIT
-    opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-    {
-        std::ostringstream err_str;
-
-        err_str << "Led_Server failed to set socket options: " << strerror(errno) << " (" << errno << ")";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
-
-    dbg_notice("created socket %d", server_fd);
 }
 
 void Led_Server::bind_socket()
@@ -136,7 +106,7 @@ void Led_Server::start_server()
             }
 
             // sleep to avoid busy waiting for clients
-            std::this_thread::sleep_for(std::chrono::milliseconds(LED_SERVER_POLL_TIME_MS));
+            std::this_thread::sleep_for(std::chrono::milliseconds(LED_MESSAGE_POLL_TIME_MS));
             continue;
         }
 

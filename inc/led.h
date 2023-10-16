@@ -4,8 +4,11 @@
 #include <stdint.h>
 #include <vector>
 
-#define LED_MAGIC       "LEDS"
-#define LED_MAGIC_LEN   (sizeof(LED_MAGIC) - 1)
+#define LED_MAGIC                   "LEDS"
+#define LED_MAGIC_LEN               (sizeof(LED_MAGIC) - 1)
+#define LED_MAX_COUNT               250
+#define LED_HEADER_SIZE             (LED_MAGIC_LEN + sizeof(uint32_t))
+#define LED_BUFFER_MAX_SIZE         (LED_HEADER_SIZE + (LED_MAX_COUNT * 3))
 
 class Led_Strip
 {
