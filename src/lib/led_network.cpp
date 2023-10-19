@@ -15,12 +15,38 @@
 Led_Network::Led_Network()
     : socket_fd(-1)
     , socket_initialized(false)
+    , send_message_count(0)
+    , receive_message_count(0)
 {
 }
 
 Led_Network::~Led_Network()
 {
     close_socket();
+}
+
+int Led_Network::get_receive_message_count()
+{
+    return receive_message_count.load();
+}
+
+int Led_Network::get_send_message_count()
+{
+    return send_message_count.load();
+}
+
+void Led_Network::inc_send_message_count()
+{
+    int value = send_message_count.load();
+    ++value;
+    send_message_count.store(value);
+}
+
+void Led_Network::inc_receive_message_count()
+{
+    int value = receive_message_count.load();
+    ++value;
+    receive_message_count.store(value);
 }
 
 void Led_Network::create_socket()
@@ -100,20 +126,21 @@ bool Led_Network::tcp_receive_timeout(
 }
 
 
-void Led_Network::send_all(const std::vector<uint8_t> &led_frame)
+void Led_Network::send_all(int dest_socket, const std::vector<uint8_t> &led_frame)
 {
     ssize_t bytes_sent = 0;
     ssize_t total_bytes_sent = 0;
     const uint8_t *send_ptr;
     ssize_t expected_size = led_frame.size();
     ssize_t remaining_size;
+    auto start_time = std::chrono::high_resolution_clock::now();
 
     // do not send to invalid socket
-    if (!socket_initialized)
+    if (dest_socket < 0)
     {
         std::ostringstream err_str;
 
-        err_str << "Led_Client failed to send - socket is not initialized";
+        err_str << "Failed to send - socket is not initialized";
         dbg_error("%s", err_str.str().c_str());
         throw std::runtime_error(err_str.str());
     }
@@ -137,7 +164,7 @@ void Led_Network::send_all(const std::vector<uint8_t> &led_frame)
         remaining_size = expected_size - total_bytes_sent;
 
         // attempt to send to server
-        bytes_sent = send(socket_fd, send_ptr, remaining_size, 0);
+        bytes_sent = send(dest_socket, send_ptr, remaining_size, 0);
         if (bytes_sent == -1)
         {
             std::ostringstream err_str;
@@ -152,7 +179,7 @@ void Led_Network::send_all(const std::vector<uint8_t> &led_frame)
     }
 }
 
-std::vector<uint8_t> Led_Network::receive_all()
+std::vector<uint8_t> Led_Network::receive_all(int src_socket)
 {
     ssize_t bytes_recv = 0;
     ssize_t total_bytes_recv = 0;
@@ -165,12 +192,14 @@ std::vector<uint8_t> Led_Network::receive_all()
     uint32_t led_count;
     auto start_time = std::chrono::high_resolution_clock::now();
 
+    dbg_notice("receive_all");
+
     // do not send to invalid socket
-    if (!socket_initialized)
+    if (src_socket < 0)
     {
         std::ostringstream err_str;
 
-        err_str << "Led_Client failed to send - socket is not initialized";
+        err_str << "Failed to receive message - socket is not initialized";
         dbg_error("%s", err_str.str().c_str());
         throw std::runtime_error(err_str.str());
     }
@@ -195,7 +224,7 @@ std::vector<uint8_t> Led_Network::receive_all()
         remaining_size = expected_size - total_bytes_recv;
 
         // attempt to send to server
-        bytes_recv = recv(socket_fd, recv_ptr, remaining_size, 0);
+        bytes_recv = recv(src_socket, recv_ptr, remaining_size, 0);
         if (bytes_recv == -1)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK) 
@@ -219,6 +248,7 @@ std::vector<uint8_t> Led_Network::receive_all()
         // update bytes successfully sent
         total_bytes_recv += bytes_recv;
     }
+    dbg_notice("received %zu bytes", total_bytes_recv);
 
     // check header was rcev
     if (total_bytes_recv != LED_HEADER_SIZE)
@@ -233,6 +263,7 @@ std::vector<uint8_t> Led_Network::receive_all()
     // check header is valid and get led count
     header_data = reinterpret_cast<Led_Strip::led_net_t*>(led_header.data());
     led_count = ntohl(header_data->net_led_count);
+    dbg_notice("received led count: %d", led_count);
     if (led_count < 1 || led_count > LED_MAX_COUNT)
     {
         std::ostringstream err_str;
@@ -245,6 +276,7 @@ std::vector<uint8_t> Led_Network::receive_all()
     // create the final buffer with space to store LED header and data
     expected_size = LED_HEADER_SIZE + (led_count * sizeof(Led_Strip::led_color_t));
     led_frame.resize(expected_size);
+    dbg_notice("expect total frame size: %zu", expected_size);
     if (led_frame.size() != expected_size)
     {
         std::string err = "Failed to allocate space for led frame";
@@ -273,7 +305,7 @@ std::vector<uint8_t> Led_Network::receive_all()
         }
 
         // attempt to send to server
-        bytes_recv = recv(socket_fd, recv_ptr, remaining_size, 0);
+        bytes_recv = recv(src_socket, recv_ptr, remaining_size, 0);
         if (bytes_recv == -1)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {

@@ -65,50 +65,39 @@ void Led_Client::bind_socket()
     dbg_notice("Successfully bind socket");
 }
 
-void Led_Client::send_test()
+void Led_Client::set_socket_timeout()
+{  
+    // timeout after 3 seconds if connect fails
+    struct timeval timeout;
+    timeout.tv_sec = 3;
+    timeout.tv_usec = 0;
+
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) 
+    {
+        std::ostringstream err_str;
+
+        err_str << "Failed to set timeout: " << strerror(errno) << " (" << errno << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    dbg_notice("set timeout to 3 seconds");
+}
+
+void Led_Client::send(std::vector<uint8_t> &client_message)
 {
-    Led_Strip client_leds(3, 255, 0, 255);
-    std::vector<uint8_t> client_message = client_leds.get_led_net_frame();
+    Led_Strip response_leds(1);
 
-    //ssize_t bytes_rcvd;
-    //const char *client_msg_data = "Message from client";
-    //char *client_ptr;
+    // send to server
+    dbg_notice("send LEDs to server");
+    dbg_verbose_print_vector(client_message);
+    send_all(socket_fd, client_message);
 
-    send_all(client_message);
+    // get response from server
+    dbg_notice("get server response");
+    std::vector<uint8_t> response_data = receive_all(socket_fd);
+    response_leds.set_leds_from_net_frame(response_data);
+    response_leds.print_all_leds();
 
-#if 0
-    // send client message to server
-    if ((bytes_sent = send(socket_fd, &client_msg, sizeof(client_msg), 0)) != sizeof(client_msg))
-    {
-        std::ostringstream err_str;
-
-        err_str << "Led_Client failed to send: sent " << bytes_sent << " (expected " << sizeof(client_msg) << ")";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
-
-    // Receive response from server
-    if ((bytes_rcvd = recv(socket_fd, &server_msg, sizeof(server_msg), 0)) != sizeof(server_msg))
-    {
-        std::ostringstream err_str;
-
-        err_str << "Led_Client failed to receive server message: receive " << bytes_rcvd << " (expected " << sizeof(server_msg) << ")";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
-
-    if (server_msg.magic == LED_MSG_MAGIC)
-    {
-        std::ostringstream notice_str;
-        notice_str << "Led_Client received data: " << server_msg.data;
-        dbg_notice("%s", notice_str.str().c_str());
-    }
-    else
-    {
-        std::ostringstream err_str;
-        err_str << "Led_Client received invalid magic value from server";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
-#endif
+    dbg_notice("exit");
 }

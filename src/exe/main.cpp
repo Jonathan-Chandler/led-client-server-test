@@ -12,13 +12,22 @@
 #include <unistd.h>
 #include "debug.h"
 #include "led.h"
+#include "led_server.h"
+#include "led_client.h"
 #include "share.h"
+
+#define LOCAL_TEST_IP "127.0.0.1"
+#define LOCAL_TEST_PORT 1632
 
 #define MAX_FILE_NAME_LEN 256
 #define TEST_CYCLE_TIME_2_SEC 2000 // in milliseconds
 
 char filename[MAX_FILE_NAME_LEN];
 debug_mode_t debug_mode = DEBUG_ERROR;
+
+char ip[MAX_FILE_NAME_LEN];
+bool client_mode = false;
+bool server_mode = false;
 
 uint8_t led_count = 0;
 uint8_t red_value = 0;
@@ -58,7 +67,6 @@ int main(int argc, char *argv[])
 
         leds->save_all_leds("./saved_leds.dat");
         leds->print_all_leds();
-        return 0;
     }
     else if (filename[0] != 0)
     {
@@ -74,12 +82,38 @@ int main(int argc, char *argv[])
         }
 
         leds->print_all_leds();
-        return 0;
     }
     else
     {
         // require arg
         usage(argv[0]);
+        return -1;
+    }
+
+    // trying to use both client+server
+    if (client_mode && server_mode)
+    {
+        printf("Can't use both client and server mode\n");
+        return -1;
+    }
+    else if (client_mode)
+    {
+        Led_Client client(LOCAL_TEST_IP, LOCAL_TEST_PORT);
+        std::vector<uint8_t> data = leds->get_led_net_frame();
+        printf("Client Mode\n");
+
+        client.create_socket();
+        client.bind_socket();
+        client.set_socket_timeout();
+        client.send(data);
+    }
+    else if (server_mode)
+    {
+        Led_Server server(LOCAL_TEST_PORT);
+        printf("server Mode\n");
+        server.create_socket();
+        server.bind_socket();
+        server.start_server();
     }
 
     return -1;
@@ -87,12 +121,14 @@ int main(int argc, char *argv[])
 
 void usage(const char *executable_name)
 {
-    fprintf(stderr, "usage: %s [-d] [[-c led_count] [-r value] [-g value] [-b value] OR [-l input_file]]\n", executable_name);
+    fprintf(stderr, "usage: %s [-d] [-s] [-c <IP>] [[-n led_count] [-r value] [-g value] [-b value] OR [-l input_file]]\n", executable_name);
     fprintf(stderr, "        -h               - print this help text\n");
     fprintf(stderr, "        -d <mode>        - set debug logging mode (0-%d)\n", (DEBUG_MODE_COUNT-1));
+    fprintf(stderr, "        -s               - run in server mode\n");
+    fprintf(stderr, "        -c <IP>          - send client configuration to server at IP address\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "    Configure LEDs manually\n");
-    fprintf(stderr, "        -c <led_count>   - number of LEDs connected\n");
+    fprintf(stderr, "        -n <led_count>   - number of LEDs connected\n");
     fprintf(stderr, "        -r <red_value>   - LED red value (0-255)\n");
     fprintf(stderr, "        -g <green_value> - LED green value (0-255)\n");
     fprintf(stderr, "        -b <blue_value>  - LED blue value (0-255)\n");
@@ -105,12 +141,15 @@ void usage(const char *executable_name)
 int parse_args(int argc, char *argv[])
 {
     int opt; 
-    const char *short_opt = "hd:c:r:g:b:l:";
+    char ip_addr[255];
+    const char *short_opt = "hsd:n:c:r:g:b:l:";
     struct option long_opt[] =
     {
         {"help",          no_argument,       NULL, 'h'},
+        {"server",        no_argument,       NULL, 's'},
         {"debug",         required_argument, NULL, 'd'},
-        {"count",         required_argument, NULL, 'c'},
+        {"client",        required_argument, NULL, 'c'},
+        {"count",         required_argument, NULL, 'n'},
         {"red",           required_argument, NULL, 'r'},
         {"green",         required_argument, NULL, 'g'},
         {"blue",          required_argument, NULL, 'b'},
@@ -142,8 +181,20 @@ int parse_args(int argc, char *argv[])
                 dbg_verbose("set debug mode: %d", debug_mode);
                 break;
 
-            // led count
+            // client mode
             case 'c':
+                client_mode = true;
+                dbg_verbose("using client mode (IP %s)", ip_addr);
+                break;
+
+            // server mode
+            case 's':
+                server_mode = true;
+                dbg_verbose("using server mode");
+                break;
+
+            // led count
+            case 'n':
                 uint32_t leds_value;
 
                 if (isdigit(optarg[0]))

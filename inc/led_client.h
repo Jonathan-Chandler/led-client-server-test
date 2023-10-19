@@ -1,12 +1,12 @@
 #ifndef __LED_CLIENT_H__
 #define __LED_CLIENT_H__
-#include "led.h"
-#include "led_network.h"
 #include <string>
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 
+#include "led.h"
+#include "led_network.h"
 
 class Led_Client : public Led_Network
 {
@@ -17,13 +17,14 @@ public:
     //void send(std::string ipv4_addr, std::unique_ptr<Led_Strip::ser_led_strip_t> serialized_leds);
     //void receive();
 
-    void create_socket();
+    //void create_socket();
     void bind_socket();
+    void set_socket_timeout();
     //void send_socket();
-    void close_socket();
+    //void close_socket();
     //void send_leds(std::vector<uint8_t> data);
 
-    void send_test();
+    void send(std::vector<uint8_t> &client_message);
 
 private:
     struct sockaddr_in server_addr;

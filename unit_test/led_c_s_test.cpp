@@ -17,19 +17,19 @@
 #define LOCAL_TEST_IP "127.0.0.1"
 #define LOCAL_TEST_PORT 1632
 
-#if 0
 void server_runner(Led_Server *test_server);
 std::future<void> start_test_server(Led_Server &test_server);
 void stop_test_server(Led_Server &test_server, std::future<void> &server_thread);
 
 TEST_CASE("LED Client can be initialized", "[Led_Client::constructor]")
 {
-    Led_Client test_client = Led_Client(LOCAL_TEST_IP, LOCAL_TEST_PORT);
+    Led_Client test_client(LOCAL_TEST_IP, LOCAL_TEST_PORT);
 
     try
     {
         test_client.create_socket();
         test_client.bind_socket();
+        test_client.set_socket_timeout();
         //test_client.send_socket();
     }
     catch (const std::runtime_error& runtime_err)
@@ -112,7 +112,7 @@ TEST_CASE("Led_Client can connect to Led_Server", "[Led_Client::send_socket]")
     Led_Client test_client(LOCAL_TEST_IP, LOCAL_TEST_PORT);
     Led_Server test_server(LOCAL_TEST_PORT);
     std::future<void> server_thread;
-    
+
     // initialize test server and start waiting for client
     try
     {
@@ -127,9 +127,13 @@ TEST_CASE("Led_Client can connect to Led_Server", "[Led_Client::send_socket]")
     // attempt to connect/send to the server with test_client
     try
     {
+        Led_Strip client_leds(3, 255, 0, 255);
+        std::vector<uint8_t> client_message = client_leds.get_led_net_frame();
+
         test_client.create_socket();
         test_client.bind_socket();
-        test_client.send_socket();
+        test_client.set_socket_timeout();
+        test_client.send(client_message);
     }
     catch (const std::runtime_error& runtime_err)
     {
@@ -157,7 +161,8 @@ TEST_CASE("Led_Client can connect to Led_Server", "[Led_Client::send_socket]")
     }
 
     // make sure server received the client message
-    REQUIRE(test_server.get_valid_message_count() == 1);
+    REQUIRE(test_server.get_receive_message_count() == 1);
+    REQUIRE(test_server.get_send_message_count() == 1);
 }
 
 // function to run server on separate thread so server_stop can be called from main thread
@@ -208,7 +213,14 @@ void stop_test_server(Led_Server &test_server, std::future<void> &server_thread)
     } 
 
     // forward any errors thrown by the server thread
-    server_thread.get();
+    // stop the test server
+    try
+    {
+        server_thread.get();
+    }
+    catch (...)
+    {
+        std::cerr << "Unexpected error returned from test server get()" << std::endl;
+        REQUIRE(TEST_FAILS);
+    }
 }
-#endif
-

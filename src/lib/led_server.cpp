@@ -15,7 +15,6 @@ Led_Server::Led_Server(int port)
     : Led_Network()
     , server_port(port)
     , server_is_running(false)
-    , valid_message_count(0)
 {
 }
 
@@ -131,7 +130,6 @@ void Led_Server::start_server()
             send(client_fd, &server_msg, sizeof(server_msg), 0);
 
             // increment the number of valid client messages received
-            valid_message_count++;
         }
         else
         {
@@ -156,8 +154,83 @@ bool Led_Server::get_server_is_running()
     return server_is_running.load();
 }
 
-int Led_Server::get_valid_message_count()
+void Led_Server::start_server()
 {
-    return valid_message_count.load();
+    int client_fd;
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    dbg_notice("starting server");
+
+    // do not listen on invalid socket
+    if (!socket_initialized)
+    {
+        std::ostringstream err_str;
+
+        err_str << "Led_Server failed to listen - socket is not initialized";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    if (listen(socket_fd, 5) < 0) 
+    {
+        std::ostringstream err_str;
+
+        err_str << "Led_Server failed to listen on socket: " << strerror(errno) << " (" << errno << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    // socket should not block so start_server can exit when given interrupt from stop_server() on another thread
+    make_socket_nonblocking();
+
+    // signal server is waiting for connections
+    server_is_running.store(true);
+
+    dbg_notice("accepting clients");
+    while (server_is_running.load()) 
+    {
+        // accept client connection
+        client_fd = accept(socket_fd, (struct sockaddr*)&client_addr, &client_len);
+        if (client_fd < 0) 
+        {
+            if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) 
+            {
+                // log if the error wasn't caused because no clients were connected
+                dbg_error("Led_Server failed to handle client connection");
+            }
+
+            // sleep to avoid busy waiting for clients
+            std::this_thread::sleep_for(std::chrono::milliseconds(LED_MESSAGE_POLL_TIME_MS));
+            continue;
+        }
+
+        // record the connection
+        dbg_notice("client connected to server");
+
+        // Receive data from client
+        std::vector<uint8_t> client_frame = receive_all(client_fd);
+        dbg_notice("received frame from client");
+        dbg_verbose_print_vector(client_frame);
+
+        Led_Strip client_leds(1);
+        client_leds.set_leds_from_net_frame(client_frame);
+
+        printf("converted configuration client: \n");
+        client_leds.print_all_leds();
+
+        // increment the number of valid messages received
+        inc_receive_message_count();
+
+        // Send response to client
+        send_all(client_fd, client_frame);
+
+        // increment the number of valid messages received
+        inc_send_message_count();
+
+        // Close client socket
+        close(client_fd);
+
+        dbg_notice("Led_Server client disconnect");
+    }
 }
 

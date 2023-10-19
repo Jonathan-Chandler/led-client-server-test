@@ -1,6 +1,8 @@
 #ifndef __DEBUG_H__
 #define __DEBUG_H__
 #include <stdio.h>
+#include <stdint.h>
+#include <vector>
 
 typedef enum 
 {
@@ -47,5 +49,7 @@ extern debug_mode_t debug_mode;
         fprintf(stderr, "\n"); \
     } \
 } while (0)
+
+void dbg_verbose_print_vector(const std::vector<uint8_t> &client_message);
 
 #endif //__DEBUG_H__
