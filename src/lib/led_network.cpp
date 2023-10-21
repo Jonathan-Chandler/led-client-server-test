@@ -17,6 +17,7 @@ Led_Network::Led_Network()
     , socket_initialized(false)
     , send_message_count(0)
     , receive_message_count(0)
+    , stop_requested(false)
 {
 }
 
@@ -49,6 +50,16 @@ void Led_Network::inc_receive_message_count()
     receive_message_count.store(value);
 }
 
+void Led_Network::start_network()
+{
+    stop_requested.store(false);
+}
+
+void Led_Network::stop_network()
+{
+    stop_requested.store(true);
+}
+
 void Led_Network::create_socket()
 {
     int opt;
@@ -78,13 +89,13 @@ void Led_Network::create_socket()
     dbg_verbose("created socket %d", socket_fd);
 }
 
-void Led_Network::make_socket_nonblocking() 
+void Led_Network::make_socket_nonblocking(int config_socket) 
 {
     int flags;
     dbg_notice("setting socket to nonblocking mode");
 
     // get current socket flags
-    if ( (flags = fcntl(socket_fd, F_GETFL, 0)) == -1) 
+    if ( (flags = fcntl(config_socket, F_GETFL, 0)) == -1) 
     {
         std::ostringstream err_str;
 
@@ -94,7 +105,7 @@ void Led_Network::make_socket_nonblocking()
     }
 
     // add option nonblocking to current flags
-    if (fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK) == -1) 
+    if (fcntl(config_socket, F_SETFL, flags | O_NONBLOCK) == -1) 
     {
         std::ostringstream err_str;
 
@@ -115,18 +126,24 @@ void Led_Network::close_socket()
     }
 }
 
-bool Led_Network::tcp_receive_timeout(
+bool Led_Network::check_tcp_timeout(
             const std::chrono::time_point<std::chrono::high_resolution_clock>& start
         )
 {
     auto end = std::chrono::high_resolution_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
+    // handle as timeout if stopping
+    if (stop_requested.load())
+    {
+        return true;
+    }
+
     return (elapsed >= std::chrono::milliseconds(LED_MESSAGE_TIMEOUT_MS));
 }
 
 
-void Led_Network::send_all(int dest_socket, const std::vector<uint8_t> &led_frame)
+void Led_Network::send_all(int dst_socket, const std::vector<uint8_t> &led_frame)
 {
     ssize_t bytes_sent = 0;
     ssize_t total_bytes_sent = 0;
@@ -136,7 +153,7 @@ void Led_Network::send_all(int dest_socket, const std::vector<uint8_t> &led_fram
     auto start_time = std::chrono::high_resolution_clock::now();
 
     // do not send to invalid socket
-    if (dest_socket < 0)
+    if (dst_socket < 0)
     {
         std::ostringstream err_str;
 
@@ -159,19 +176,41 @@ void Led_Network::send_all(int dest_socket, const std::vector<uint8_t> &led_fram
     // send client message to server
     while (total_bytes_sent < led_frame.size())
     {
+        // timed out while waiting for message
+        if (check_tcp_timeout(start_time))
+        {
+            // failed while getting data
+            std::ostringstream err_str;
+
+            err_str << "Timed out while sending message: sent " << total_bytes_sent << " of expected total bytes " << expected_size;
+            dbg_error("%s", err_str.str().c_str());
+            throw std::runtime_error(err_str.str());
+        }
+
         // update current buffer pointer / remaining number of bytes to be sent
         send_ptr = &led_frame.data()[total_bytes_sent];
         remaining_size = expected_size - total_bytes_sent;
 
         // attempt to send to server
-        bytes_sent = send(dest_socket, send_ptr, remaining_size, 0);
+        bytes_sent = send(dst_socket, send_ptr, remaining_size, 0);
         if (bytes_sent == -1)
         {
-            std::ostringstream err_str;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) 
+            {
+                // no data is waiting - wait 
+                std::this_thread::sleep_for(std::chrono::milliseconds(LED_MESSAGE_POLL_TIME_MS));
 
-            err_str << "Led_Client failed to send: sent " << total_bytes_sent << " of expected total bytes " << expected_size;
-            dbg_error("%s", err_str.str().c_str());
-            throw std::runtime_error(err_str.str());
+                continue;
+            } 
+            else 
+            {
+                // failed while getting data
+                std::ostringstream err_str;
+
+                err_str << "Led_Client failed to send: sent " << total_bytes_sent << " of expected total bytes " << expected_size;
+                dbg_error("%s", err_str.str().c_str());
+                throw std::runtime_error(err_str.str());
+            }
         }
 
         // update bytes successfully sent
@@ -209,7 +248,7 @@ std::vector<uint8_t> Led_Network::receive_all(int src_socket)
     while (total_bytes_recv < LED_HEADER_SIZE)
     {
         // timed out while waiting for message
-        if (tcp_receive_timeout(start_time))
+        if (check_tcp_timeout(start_time))
         {
             // failed while getting data
             std::ostringstream err_str;
@@ -223,7 +262,7 @@ std::vector<uint8_t> Led_Network::receive_all(int src_socket)
         recv_ptr = &led_header.data()[total_bytes_recv];
         remaining_size = expected_size - total_bytes_recv;
 
-        // attempt to send to server
+        // get header data from socket
         bytes_recv = recv(src_socket, recv_ptr, remaining_size, 0);
         if (bytes_recv == -1)
         {
@@ -295,7 +334,7 @@ std::vector<uint8_t> Led_Network::receive_all(int src_socket)
         remaining_size = expected_size - total_bytes_recv;
 
         // timed out while waiting for message
-        if (tcp_receive_timeout(start_time))
+        if (check_tcp_timeout(start_time))
         {
             std::ostringstream err_str;
 
@@ -304,7 +343,7 @@ std::vector<uint8_t> Led_Network::receive_all(int src_socket)
             throw std::runtime_error(err_str.str());
         }
 
-        // attempt to send to server
+        // get led data from socket
         bytes_recv = recv(src_socket, recv_ptr, remaining_size, 0);
         if (bytes_recv == -1)
         {

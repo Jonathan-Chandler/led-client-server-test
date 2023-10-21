@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <chrono>
 #include <thread>
+#include <future>
 
 #include "debug.h"
 #include "led_server.h"
@@ -20,6 +21,26 @@ Led_Server::Led_Server(int port)
 
 Led_Server::~Led_Server()
 {
+}
+
+void Led_Server::initialize()
+{
+    dbg_notice("Initialize server");
+
+    if (!socket_initialized)
+    {
+        // create TCP socket
+        create_socket();
+
+        // accept all IPv4 connections on server port
+        bind_socket();
+
+        // make server socket nonblocking to allow stop_server while polling for messages
+        make_socket_nonblocking(socket_fd);
+
+        // Update socket init status
+        socket_initialized = true;
+    }
 }
 
 void Led_Server::bind_socket()
@@ -47,111 +68,18 @@ void Led_Server::bind_socket()
         throw std::runtime_error(err_str.str());
     }
 
-    // Update socket init status
-    socket_initialized = true;
 
     dbg_notice("Led_Server successfully bind socket");
 }
-
-#if 0
-void Led_Server::start_server()
-{
-    led_msg_t client_msg;
-    led_msg_t server_msg;
-    int client_fd;
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    dbg_notice("starting server");
-
-    // do not listen on invalid socket
-    if (!socket_initialized)
-    {
-        std::ostringstream err_str;
-
-        err_str << "Led_Server failed to listen - socket is not initialized";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
-
-    if (listen(socket_fd, 5) < 0) 
-    {
-        std::ostringstream err_str;
-
-        err_str << "Led_Server failed to listen on socket: " << strerror(errno) << " (" << errno << ")";
-        dbg_error("%s", err_str.str().c_str());
-        throw std::runtime_error(err_str.str());
-    }
-
-    // socket should not block so start_server can exit when given interrupt from stop_server() on another thread
-    make_socket_nonblocking();
-
-    // signal server is waiting for connections
-    server_is_running.store(true);
-
-    while (server_is_running.load()) 
-    {
-        dbg_notice("accepting clients");
-
-        // accept client connection
-        client_fd = accept(socket_fd, (struct sockaddr*)&client_addr, &client_len);
-        if (client_fd < 0) 
-        {
-            if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) 
-            {
-                // log if the error wasn't caused because no clients were connected
-                dbg_error("Led_Server failed to handle client connection");
-            }
-
-            // sleep to avoid busy waiting for clients
-            std::this_thread::sleep_for(std::chrono::milliseconds(LED_MESSAGE_POLL_TIME_MS));
-            continue;
-        }
-
-        // record the connection
-        dbg_notice("Led_Server client connected");
-
-        // Receive data from client
-        recv(client_fd, &client_msg, sizeof(client_msg), 0);
-
-        // check magic value and send response
-        if (client_msg.magic == LED_MSG_MAGIC)
-        {
-            const char *response_msg = "Message from server";
-
-            dbg_notice("Led_Server receive valid data from client: %s", client_msg.data);
-
-            // set server response
-            server_msg.magic = LED_MSG_MAGIC;
-            server_msg.id = 0;
-            server_msg.length = strlen(response_msg);
-            memcpy(server_msg.data, response_msg, strlen(response_msg)+1);
-
-            // Send response to client
-            send(client_fd, &server_msg, sizeof(server_msg), 0);
-
-            // increment the number of valid client messages received
-        }
-        else
-        {
-            dbg_error("Led_Server receive invalid data from client");
-        }
-
-        // Close client socket
-        close(client_fd);
-
-        dbg_notice("Led_Server client disconnect");
-    }
-}
-#endif
-
 void Led_Server::stop_server()
 {
     server_is_running.store(false);
+    stop_network();
 }
 
 bool Led_Server::get_server_is_running()
 {
-    return server_is_running.load();
+    return (server_is_running.load() && !stop_requested.load());
 }
 
 void Led_Server::start_server()
@@ -180,10 +108,8 @@ void Led_Server::start_server()
         throw std::runtime_error(err_str.str());
     }
 
-    // socket should not block so start_server can exit when given interrupt from stop_server() on another thread
-    make_socket_nonblocking();
-
     // signal server is waiting for connections
+    start_network();
     server_is_running.store(true);
 
     dbg_notice("accepting clients");
@@ -203,9 +129,11 @@ void Led_Server::start_server()
             std::this_thread::sleep_for(std::chrono::milliseconds(LED_MESSAGE_POLL_TIME_MS));
             continue;
         }
-
         // record the connection
         dbg_notice("client connected to server");
+
+        // do not block for client socket
+        make_socket_nonblocking(client_fd);
 
         // Receive data from client
         std::vector<uint8_t> client_frame = receive_all(client_fd);
@@ -231,6 +159,95 @@ void Led_Server::start_server()
         close(client_fd);
 
         dbg_notice("Led_Server client disconnect");
+    }
+}
+
+Led_Server_Nonblocking::Led_Server_Nonblocking(int port)
+    : server(port)
+{
+}
+
+Led_Server_Nonblocking::~Led_Server_Nonblocking()
+{
+}
+
+void Led_Server_Nonblocking::initialize()
+{
+    if (!socket_initialized)
+    {
+        server.initialize();
+
+        socket_initialized = true;
+    }
+}
+
+bool Led_Server_Nonblocking::get_server_is_running()
+{
+    return server.get_server_is_running();
+}
+
+int Led_Server_Nonblocking::get_send_message_count()
+{
+    return server.get_send_message_count();
+}
+
+int Led_Server_Nonblocking::get_receive_message_count()
+{
+    return server.get_receive_message_count();
+}
+
+void Led_Server_Nonblocking::start_server()
+{
+    if (!socket_initialized)
+    {
+        std::ostringstream err_str;
+
+        err_str << "Not initialized";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    // starting server that has already been started
+    if (!server_thread_handle.valid())
+    {
+        server_thread_handle = std::async(std::launch::async, &Led_Server::start_server, &server);
+    }
+    else
+    {
+        std::ostringstream err_str;
+
+        err_str << "Server is already running";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+}
+
+void Led_Server_Nonblocking::stop_server()
+{
+    // forward the stop request
+    server.stop_server();
+
+    // wait for 2 seconds before giving up and throwing an error
+    if (server_thread_handle.wait_for(std::chrono::seconds(2)) != std::future_status::ready) 
+    {
+        std::ostringstream err_str;
+
+        err_str << "Timed out while trying to stop server thread";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    try 
+    {
+        server_thread_handle.get();
+    } 
+    catch (const std::exception& e) 
+    {
+        std::ostringstream err_str;
+
+        err_str << "server thread returned error: " << e.what();
+        dbg_error("%s", err_str.str().c_str());
+        throw;
     }
 }
 

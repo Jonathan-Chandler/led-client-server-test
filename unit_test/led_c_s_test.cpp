@@ -27,16 +27,13 @@ TEST_CASE("LED Client can be initialized", "[Led_Client::constructor]")
 
     try
     {
-        test_client.create_socket();
-        test_client.bind_socket();
-        test_client.set_socket_timeout();
+        test_client.initialize();
         //test_client.send_socket();
     }
     catch (const std::runtime_error& runtime_err)
     {
         // expect runtime error because server is not running
         std::cerr << "Caught exception of an expected type: " << runtime_err.what() << std::endl;
-        test_client.close_socket();
         REQUIRE(TEST_PASSES);
         return;
     }
@@ -44,7 +41,6 @@ TEST_CASE("LED Client can be initialized", "[Led_Client::constructor]")
     {
         // unknown error
         std::cerr << "Caught an exception of an unexpected type." << std::endl;
-        test_client.close_socket();
         REQUIRE(TEST_FAILS);
     }
 
@@ -58,14 +54,12 @@ TEST_CASE("LED server can be initialized", "[Led_Server::constructor]")
     
     try
     {
-        test_server.create_socket();
-        test_server.bind_socket();
+        test_server.initialize();
     }
     catch (...)
     {
         // unknown error
         std::cerr << "unexpected exception while starting test_server" << std::endl;
-        test_server.close_socket();
         REQUIRE(TEST_FAILS);
     }
 
@@ -130,22 +124,18 @@ TEST_CASE("Led_Client can connect to Led_Server", "[Led_Client::send_socket]")
         Led_Strip client_leds(3, 255, 0, 255);
         std::vector<uint8_t> client_message = client_leds.get_led_net_frame();
 
-        test_client.create_socket();
-        test_client.bind_socket();
-        test_client.set_socket_timeout();
+        test_client.initialize();
         test_client.send(client_message);
     }
     catch (const std::runtime_error& runtime_err)
     {
         std::cerr << "Unexpected runtime error: " << runtime_err.what() << std::endl;
-        test_client.close_socket();
         REQUIRE(TEST_FAILS);
     }
     catch (...)
     {
         // unknown error
         std::cerr << "Unexpected error" << std::endl;
-        test_client.close_socket();
         REQUIRE(TEST_FAILS);
     }
 
@@ -165,6 +155,105 @@ TEST_CASE("Led_Client can connect to Led_Server", "[Led_Client::send_socket]")
     REQUIRE(test_server.get_send_message_count() == 1);
 }
 
+TEST_CASE("Led_Server_Nonblocking can be initialized", "[Led_Server_Nonblocking::Led_Server_Nonblocking]")
+{
+    Led_Server_Nonblocking test_server(LOCAL_TEST_PORT);
+
+    try
+    {
+        test_server.initialize();
+        test_server.start_server();
+
+        // wait ~300ms for init
+        for (int i = 0; i < 30; i++)
+        {
+            if (test_server.get_server_is_running())
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        REQUIRE(test_server.get_server_is_running() == true);
+
+        // stop server
+        test_server.stop_server();
+
+        REQUIRE(test_server.get_server_is_running() == false);
+    }
+    catch (...)
+    {
+        std::cerr << "Unexpected error returned from test server get()" << std::endl;
+        REQUIRE(TEST_FAILS);
+    }
+}
+
+TEST_CASE("Led_Server_Nonblocking accepts traffic", "[Led_Server_Nonblocking::Led_Server_Nonblocking]")
+{
+    Led_Client test_client(LOCAL_TEST_IP, LOCAL_TEST_PORT);
+    Led_Server_Nonblocking test_server(LOCAL_TEST_PORT);
+
+    try
+    {
+        test_server.initialize();
+        test_server.start_server();
+
+        // wait ~300ms for init
+        for (int i = 0; i < 30; i++)
+        {
+            if (test_server.get_server_is_running())
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        REQUIRE(test_server.get_server_is_running() == true);
+    }
+    catch (...)
+    {
+        std::cerr << "Unexpected error returned from test server get()" << std::endl;
+        REQUIRE(TEST_FAILS);
+    }
+
+
+    // attempt to connect/send to the server with test_client
+    try
+    {
+        Led_Strip client_leds(3, 255, 0, 255);
+        std::vector<uint8_t> client_message = client_leds.get_led_net_frame();
+
+        test_client.initialize();
+        test_client.send(client_message);
+    }
+    catch (...)
+    {
+        // unknown error
+        std::cerr << "Unexpected error" << std::endl;
+        REQUIRE(TEST_FAILS);
+    }
+
+    // stop the test server
+    try
+    {
+        // stop server
+        test_server.stop_server();
+        REQUIRE(test_server.get_server_is_running() == false);
+
+    }
+    catch (...)
+    {
+        std::cerr << "Unexpected error while stopping test server" << std::endl;
+        REQUIRE(TEST_FAILS);
+    }
+
+    // make sure server received the client message
+    REQUIRE(test_server.get_receive_message_count() == 1);
+    REQUIRE(test_server.get_send_message_count() == 1);
+}
+
+#if 0
+TEST_CASE("Led_Client can connect to Led_Server_Nonblocking", "[Led_Client::send]")
+{
+}
+#endif
+
 // function to run server on separate thread so server_stop can be called from main thread
 void server_runner(Led_Server *test_server)
 {
@@ -174,8 +263,7 @@ void server_runner(Led_Server *test_server)
 std::future<void> start_test_server(Led_Server &test_server)
 {
     // initialize the server socket
-    test_server.create_socket();
-    test_server.bind_socket();
+    test_server.initialize();
 
     // wait up to 5 seconds for server to start on a new thread
     std::future<void> server_thread = std::async(std::launch::async, server_runner, &test_server);

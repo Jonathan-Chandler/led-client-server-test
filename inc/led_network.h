@@ -13,22 +13,26 @@ class Led_Network
 public:
     Led_Network();
     virtual ~Led_Network();
-    void create_socket();
-    void close_socket();
+
     int get_send_message_count();
     int get_receive_message_count();
     void inc_send_message_count();
     void inc_receive_message_count();
+    void start_network();
+    void stop_network();
 
 protected:
     int socket_fd;
     bool socket_initialized;
     std::atomic<int> send_message_count;
     std::atomic<int> receive_message_count;
+    std::atomic<bool> stop_requested;
 
-    void make_socket_nonblocking();
-    bool tcp_receive_timeout(const std::chrono::time_point<std::chrono::high_resolution_clock>& start);
-    void send_all(int dest_socket, const std::vector<uint8_t> &led_frame);
+    void create_socket();
+    void close_socket();
+    void make_socket_nonblocking(int config_socket);
+    bool check_tcp_timeout(const std::chrono::time_point<std::chrono::high_resolution_clock>& start);
+    void send_all(int dst_socket, const std::vector<uint8_t> &led_frame);
     std::vector<uint8_t> receive_all(int src_socket);
 
 };

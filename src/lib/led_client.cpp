@@ -25,6 +25,26 @@ Led_Client::~Led_Client()
 {
 }
 
+void Led_Client::initialize()
+{
+    if (!socket_initialized)
+    {
+        dbg_notice("Initialize client");
+
+        // create TCP socket
+        create_socket();
+
+        // bind socket to server IPv4 address / port
+        bind_socket();
+
+        // set maximum time to wait for server response
+        set_socket_timeout();
+
+        // Update socket init status
+        socket_initialized = true;
+    }
+}
+
 void Led_Client::bind_socket()
 {
     server_addr.sin_family = AF_INET;
@@ -60,8 +80,6 @@ void Led_Client::bind_socket()
         throw std::runtime_error(err_str.str());
     }
 
-    // Update socket init status
-    socket_initialized = true;
     dbg_notice("Successfully bind socket");
 }
 
@@ -76,7 +94,16 @@ void Led_Client::set_socket_timeout()
     {
         std::ostringstream err_str;
 
-        err_str << "Failed to set timeout: " << strerror(errno) << " (" << errno << ")";
+        err_str << "Failed to set send timeout: " << strerror(errno) << " (" << errno << ")";
+        dbg_error("%s", err_str.str().c_str());
+        throw std::runtime_error(err_str.str());
+    }
+
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0)
+    {
+        std::ostringstream err_str;
+
+        err_str << "Failed to set receive timeout: " << strerror(errno) << " (" << errno << ")";
         dbg_error("%s", err_str.str().c_str());
         throw std::runtime_error(err_str.str());
     }

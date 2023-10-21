@@ -14,16 +14,7 @@ public:
     Led_Client(std::string ip_addr, int port);
     ~Led_Client() override;
 
-    //void send(std::string ipv4_addr, std::unique_ptr<Led_Strip::ser_led_strip_t> serialized_leds);
-    //void receive();
-
-    //void create_socket();
-    void bind_socket();
-    void set_socket_timeout();
-    //void send_socket();
-    //void close_socket();
-    //void send_leds(std::vector<uint8_t> data);
-
+    void initialize();
     void send(std::vector<uint8_t> &client_message);
 
 private:
@@ -31,6 +22,8 @@ private:
     std::string server_ip;
     int server_port;
 
+    void bind_socket();
+    void set_socket_timeout();
 };
 
 #endif // ifndef __LED_CLIENT_H__
